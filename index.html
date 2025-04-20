@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Exploração Pirata - RPG</title>
+    <link rel="stylesheet" href="pirate-style.css">
+    <!-- Precarregamento de imagens para melhor desempenho -->
+    <link rel="preload" as="image" href="https://raw.githubusercontent.com/rodfranbr/rpgpirata/refs/heads/main/background.jpeg">
+    <link rel="preload" as="image" href="https://raw.githubusercontent.com/rodfranbr/rpgpirata/refs/heads/main/navegando0001.jpeg">
+</head>
+<body>
+    <div id="loading-overlay">
+        <div class="compass"></div>
+        <div id="loading-text">Carregando os mares...</div>
+    </div>
+    
+    <div id="game-container">
+        <h1 id="game-title">🏴‍☠️ Exploração Pirata 🏴‍☠️</h1>
+        
+        <div id="image-display">
+            <img id="game-image" src="https://raw.githubusercontent.com/rodfranbr/rpgpirata/refs/heads/main/navegando0001.jpeg" alt="Navio pirata">
+        </div>
+        
+        <div id="status-bar">
+            <div id="gold-display">1000 ouros</div>
+            <div id="timer-display"></div>
+        </div>
+        
+        <div id="console">
+            <p>Bem-vindo ao mar dos saqueadores, Capitão! Seu navio está pronto para zarpar em busca de fortuna e glória.</p>
+            <p>Você começa sua jornada com 1000 moedas de ouro. Use-as com sabedoria!</p>
+            <p>Que os ventos soprem a seu favor. Está pronto para uma aventura pirata?</p>
+        </div>
+        
+        <div id="action-buttons">
+            <button id="explore-button">INICIAR Exploração Marítima (custo: <span class="gold-cost">10 ouros</span>)</button>
+        </div>
+    </div>
+
+    <script src="events.js"></script>
+    <script>
+        // Sistema de armazenamento local para salvar progresso
+        const saveGame = () => {
+            const gameData = {
+                gold: playerGold,
+                lastSaved: new Date().toISOString()
+            };
+            try {
+                localStorage.setItem('pirateRPGSave', JSON.stringify(gameData));
+            } catch (e) {
+                console.log('Não foi possível salvar o jogo: ', e);
+            }
+        };
+
+        const loadGame = () => {
+            try {
+                const savedGame = localStorage.getItem('pirateRPGSave');
+                if (savedGame) {
+                    const gameData = JSON.parse(savedGame);
+                    playerGold = gameData.gold;
+                    updateGoldDisplay();
+                    logMessage(`Jogo carregado! Última jogada: ${new Date(gameData.lastSaved).toLocaleString()}`);
+                }
+            } catch (e) {
+                console.log('Não foi possível carregar o jogo: ', e);
+            }
+        };
+
+        // Pré-carregamento de imagens
+        const preloadImages = () => {
+            // Carregar imagens de navegação
+            const imagesToPreload = [
+                ...Array.from({length: 7}, (_, i) => 
+                    `https://raw.githubusercontent.com/rodfranbr/rpgpirata/refs/heads/main/navegando000${i+1}.jpeg`)
+            ];
+            
+            // Adicionar imagens de eventos
+            events.forEach(event => {
+                if (event.images) imagesToPreload.push(...event.images);
+                
+                // Adicionar imagens de ações
+                event.actions.forEach(action => {
+                    if (action.image) imagesToPreload.push(action.image);
+                    
+                    // Adicionar imagens de resultados
+                    if (action.result) {
+                        const result = action.result;
+                        if (result.image) imagesToPreload.push(result.image);
+                        if (result.treasureImage) imagesToPreload.push(result.treasureImage);
+                        if (result.emptyChestImage) imagesToPreload.push(result.emptyChestImage);
+                        if (result.noTreasureImage) imagesToPreload.push(result.noTreasureImage);
+                        if (result.successImage) imagesToPreload.push(result.successImage);
+                        if (result.failureImage) imagesToPreload.push(result.failureImage);
+                    }
+                });
+            });
+            
+            // Executar pré-carregamento
+            imagesToPreload.forEach(src => {
+                const img = new Image();
+                img.src = src;
+            });
+        };
+
+        // Variáveis globais
+        let playerGold = 1000;
+        let isExploring = false;
+        let explorationTimer = null;
+        let eventTimer = null;
+        let currentCountdown = 0;
+        let explorationImages = Array.from({length: 7}, (_, i) => 
+            `https://raw.githubusercontent.com/rodfranbr/rpgpirata/refs/heads/main/navegando000${i+1}.jpeg`);
+        
+        // Elementos DOM
+        const goldDisplay = document.getElementById('gold-display');
+        const consoleElement = document.getElementById('console');
+        const actionButtons = document.getElementById('action-buttons');
+        const exploreButton = document.getElementById('explore-button');
+        const timerDisplay = document.getElementById('timer-display');
+        const gameImage = document.getElementById('game-image');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        
+        // Inicialização
+        document.addEventListener('DOMContentLoaded', () => {
+            // Carregar jogo salvo, se existir
+            loadGame();
+            
+            // Atualizar display de ouro
+            updateGoldDisplay();
+            
+            // Pré-carregar imagens
+            preloadImages();
+            
+            // Esconde overlay de carregamento após 2 segundos
+            setTimeout(() => {
+                loadingOverlay.style.opacity = '0';
+                setTimeout(() => {
+                    loadingOverlay.style.display = 'none';
+                }, 500);
+            }, 2000);
+            
+            // Event listeners
+            exploreButton.addEventListener('click', startExploration);
+            
+            // Salvar jogo periodicamente
+            setInterval(saveGame, 60000); // Salva a cada minuto
+        });
+        
+        function updateGoldDisplay() {
+            goldDisplay.textContent = `${playerGold} ouros`;
+            goldDisplay.classList.remove('gold-gained', 'damage-taken');
+            void goldDisplay.offsetWidth; // Força reflow para reiniciar animação
+        }
+        
+        function updateGoldWithAnimation(amount) {
+            playerGold += amount;
+            updateGoldDisplay();
+            
+            if (amount > 0) {
+                goldDisplay.classList.add('gold-gained');
+            } else if (amount < 0) {
+                goldDisplay.classList.add('damage-taken');
+            }
+            
+            // Salvar depois de atualizar o ouro
+            saveGame();
+        }
+        
+        function logMessage(message, isEventTitle = false) {
+            const p = document.createElement('p');
+            
+            if (isEventTitle) {
+                p.classList.add('event-title');
+            }
+            
+            p.innerHTML = message;
+            consoleElement.appendChild(p);
+            consoleElement.scrollTop = consoleElement.scrollHeight;
+        }
+        
+        function setImage(url) {
+            gameImage.src = url;
+        }
+        
+        function startExploration() {
+            if (playerGold < 10) {
+                logMessage("Você não tem ouro suficiente para explorar! (custo: 10 ouros)");
+                return;
+            }
+            
+            // Cobrar custo de exploração
+            updateGoldWithAnimation(-10);
+            
+            // Limpar botões atuais
+            actionButtons.innerHTML = '';
+            
+            // Adicionar botão de parar exploração
+            const stopButton = document.createElement('button');
+            stopButton.textContent = "Parar Exploração";
+            stopButton.addEventListener('click', stopExploration);
+            actionButtons.appendChild(stopButton);
+            
+            isExploring = true;
+            logMessage("Seu navio zarpou em busca de aventuras! A cada 60 segundos, algo poderá acontecer...");
+            
+            // Iniciar rotação de imagens de navegação
+            rotateNavigationImages();
+            
+            // Configurar timer de eventos (a cada 60 segundos)
+            explorationTimer = setInterval(checkForEvent, 60000);
+            
+            // Adicionar mensagens aleatórias de exploração a cada 10 segundos
+            setInterval(showRandomNavigationMessage, 10000);
+        }
+        
+        function stopExploration() {
+            if (!isExploring) return;
+            
+            clearInterval(explorationTimer);
+            if (eventTimer) clearTimeout(eventTimer);
+            
+            isExploring = false;
+            
+            actionButtons.innerHTML = '';
+            const exploreBtn = document.createElement('button');
+            exploreBtn.id = 'explore-button';
+            exploreBtn.innerHTML = `INICIAR Exploração Marítima (custo: <span class="gold-cost">10 ouros</span>)`;
+            exploreBtn.addEventListener('click', startExploration);
+            actionButtons.appendChild(exploreBtn);
+            
+            logMessage("Você interrompeu sua exploração e retornou ao porto.");
+            timerDisplay.textContent = '';
+            
+            // Salvar jogo ao parar exploração
+            saveGame();
+        }
+        
+        function rotateNavigationImages() {
+            if (!isExploring) return;
+            
+            const randomIndex = Math.floor(Math.random() * explorationImages.length);
+            setImage(explorationImages[randomIndex]);
+            
+            setTimeout(rotateNavigationImages, 5000);
+        }
+        
+        function showRandomNavigationMessage() {
+            if (!isExploring || document.querySelector('#action-buttons button').textContent !== "Parar Exploração") {
+                return; // Se não estiver explorando ou estiver em um evento, não mostrar mensagens
+            }
+            
+            // Mensagens são carregadas do arquivo events.js
+            const messageIndex = Math.floor(Math.random() * navigationMessages.length);
+            logMessage(navigationMessages[messageIndex]);
+        }
+        
+        function checkForEvent() {
+            if (!isExploring) return;
+            
+            // Calcular chance total de todos os eventos
+            const totalEventChance = events.reduce((sum, event) => sum + event.chance, 0);
+            
+            // 10% de chance de evento ocorrer
+            const eventRoll = Math.random() * 100;
+            if (eventRoll <= 10) {
+                // Sortear qual evento ocorrerá baseado nas chances relativas
+                determineEvent();
+            } else {
+                // Nada acontece, continua navegando
+                logMessage("Nada de interessante no horizonte. A jornada continua...");
+            }
+        }
+        
+        function determineEvent() {
+            // Determinar qual evento ocorrerá baseado nas chances relativas
+            const roll = Math.random() * 100;
+            let threshold = 0;
+            
+            // Normalizar chances para que sejam relativas ao total de 100%
+            const totalChance = events.reduce((sum, event) => sum + event.chance, 0);
+            
+            for (const event of events) {
+                // Calcular chance normalizada
+                const normalizedChance = (event.chance / totalChance) * 100;
+                threshold += normalizedChance;
+                
+                if (roll <= threshold) {
+                    triggerEvent(event);
+                    return;
+                }
+            }
+        }
+        
+        function triggerEvent(event) {
+            // Parar a exploração temporariamente durante o evento
+            clearInterval(explorationTimer);
+            
+            // Mostrar título e descrição do evento
+            logMessage(event.title, true);
+            
+            // Escolher uma descrição aleatória
+            const descIndex = Math.floor(Math.random() * event.descriptions.length);
+            logMessage(event.descriptions[descIndex]);
+            
+            // Atualizar imagem
+            if (event.images && event.images.length > 0) {
+                const imgIndex = Math.floor(Math.random() * event.images.length);
+                setImage(event.images[imgIndex]);
+            }
+            
+            // Limpar botões anteriores
+            actionButtons.innerHTML = '';
+            
+            // Adicionar botões de ação do evento
+            event.actions.forEach(action => {
+                // Verificar se o jogador tem ouro suficiente para a ação
+                const button = document.createElement('button');
+                button.innerHTML = `${action.name} ${action.cost > 0 ? `(custo: <span class="gold-cost">${action.cost} ouros</span>)` : ''}`;
+                
+                if (action.cost > playerGold) {
+                    button.disabled = true;
+                    button.title = "Ouro insuficiente";
+                }
+                
+                button.addEventListener('click', () => executeAction(action, event));
+                actionButtons.appendChild(button);
+            });
+        }
+        
+        function executeAction(action, parentEvent) {
+            // Verificar e cobrar custo da ação
+            if (action.cost > 0) {
+                updateGoldWithAnimation(-action.cost);
+                logMessage(`Você gastou <span class="gold-cost">${action.cost} ouros</span> para ${action.name.toLowerCase()}.`);
+            }
+            
+            // Limpar botões enquanto a ação está em andamento
+            actionButtons.innerHTML = '';
+            
+            // Mostrar imagem da ação se disponível
+            if (action.image) {
+                setImage(action.image);
+            }
+            
+            // Iniciar countdown
+            startCountdown(action.duration, () => {
+                // Após o countdown, processar resultado da ação
+                processActionResult(action, parentEvent);
+            });
+            
+            // Mensagem de espera
+            logMessage(action.startMessage || `Aguarde enquanto ${action.name.toLowerCase()}...`);
+        }
+        
+        function startCountdown(seconds, callback) {
+            currentCountdown = seconds;
+            updateTimerDisplay();
+            
+            eventTimer = setInterval(() => {
+                currentCountdown--;
+                updateTimerDisplay();
+                
+                if (currentCountdown <= 0) {
+                    clearInterval(eventTimer);
+                    eventTimer = null;
+                    timerDisplay.textContent = '';
+                    callback();
+                }
+            }, 1000);
+        }
+        
+        function updateTimerDisplay() {
+            const minutes = Math.floor(currentCountdown / 60);
+            const seconds = currentCountdown % 60;
+            timerDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+        
+        function processActionResult(action, parentEvent) {
+            // Calcular resultado baseado nas probabilidades e ranges
+            const result = calculateResult(action);
+            
+            // Atualizar ouro do jogador com o resultado
+            if (result.gold !== 0) {
+                updateGoldWithAnimation(result.gold);
+                
+                const goldMessage = result.gold > 0 
+                    ? `Você ganhou <span class="highlight">+${result.gold} ouros</span>!` 
+                    : `Você perdeu <span class="highlight">${Math.abs(result.gold)} ouros</span>!`;
+                    
+                logMessage(goldMessage);
+            }
+            
+            // Mostrar mensagem de resultado
+            logMessage(result.message);
+            
+            // Atualizar imagem de resultado se disponível
+            if (result.image) {
+                setImage(result.image);
+            }
+            
+            // Adicionar botão para retornar à exploração
+            resetToExploration();
+            
+            // Adicionar classes especiais com base no tipo de resultado
+            if (result.gold > 100) {
+                consoleElement.classList.add('treasure-found');
+                setTimeout(() => consoleElement.classList.remove('treasure-found'), 3000);
+            }
+            
+            if (parentEvent.id === 'tempestade') {
+                document.getElementById('game-container').classList.add('storm-active');
+                setTimeout(() => document.getElementById('game-container').classList.remove('storm-active'), 3000);
+            }
+        }
+        
+        function calculateResult(action) {
+            // Determinar sucesso/falha baseado na chance
+            const roll = Math.random() * 100;
+            
+            // Caso padrão para resultado
+            let resultObj = {
+                gold: 0,
+                message: "Nada aconteceu.",
+                image: null
+            };
+            
+            // Processar os diferentes tipos de resultado baseado no action.result
+            if (action.result) {
+                // Resultado de batalha ou evento com chance de sucesso/falha
+                if (action.result.type === 'chance') {
+                    if (roll <= action.result.successChance) {
+                        // Sucesso
+                        resultObj.gold = randomInt(action.result.successGoldMin, action.result.successGoldMax);
+                        resultObj.message = action.result.successMessage;
+                        resultObj.image = action.result.successImage;
+                    } else {
+                        // Falha
+                        if (action.result.failureGoldPercent) {
+                            // Perda percentual
+                            const lossPercent = randomInt(action.result.failureGoldPercent.min, action.result.failureGoldPercent.max);
+                            resultObj.gold = -Math.floor(playerGold * (lossPercent / 100));
+                        } else if (action.result.failureGoldMin !== undefined) {
+                            // Perda fixa
+                            resultObj.gold = -randomInt(action.result.failureGoldMin, action.result.failureGoldMax);
+                        }
+                        resultObj.message = action.result.failureMessage;
+                        resultObj.image = action.result.failureImage;
+                    }
+                }
+                // Resultado de loot direto (ex: escavar tesouro)
+                else if (action.result.type === 'loot') {
+                    // Verificar se o tesouro é encontrado
+                    if (roll <= action.result.findChance) {
+                        // Encontrou tesouro
+                        resultObj.gold = randomInt(action.result.goldMin, action.result.goldMax);
+                        
+                        // Determinar qual imagem mostrar baseado no valor
+                        if (resultObj.gold <= action.cost) {
+                            resultObj.image = action.result.emptyChestImage;
+                            resultObj.message = "Você encontrou um baú, mas ele contém pouco ouro. Mal cobre seus custos!";
+                        } else {
+                            resultObj.image = action.result.treasureImage;
+                            resultObj.message = "Você encontrou um baú cheio de ouro! Sua sorte está lançada!";
+                        }
+                    } else {
+                        // Não encontrou tesouro
+                        resultObj.gold = 0;
+                        resultObj.image = action.result.noTreasureImage;
+                        resultObj.message = "Você escavou bastante, mas não encontrou nenhum tesouro.";
+                    }
+                }
+                // Resultado de ganho de recursos garantido
+                else if (action.result.type === 'resource') {
+                    resultObj.gold = randomInt(action.result.goldMin, action.result.goldMax);
+                    resultObj.message = action.result.message;
+                    resultObj.image = action.result.image;
+                }
+            }
+            
+            return resultObj;
+        }
+        
+        function randomInt(min, max) {
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+        }
+        
+        function resetToExploration() {
+            // Adicionar botão para continuar exploração
+            actionButtons.innerHTML = '';
+            const continueButton = document.createElement('button');
+            continueButton.textContent = "Continuar Exploração";
+            continueButton.addEventListener('click', () => {
+                // Reiniciar exploração após evento
+                logMessage("Sua tripulação está descansada e pronta para continuar a exploração!");
+                
+                // Restaurar botões de exploração
+                actionButtons.innerHTML = '';
+                const stopButton = document.createElement('button');
+                stopButton.textContent = "Parar Exploração";
+                stopButton.addEventListener('click', stopExploration);
+                actionButtons.appendChild(stopButton);
+                
+                // Reiniciar timer de eventos
+                explorationTimer = setInterval(checkForEvent, 60000);
+                
+                // Voltar a exibir imagens de navegação
+                rotateNavigationImages();
+            });
+            actionButtons.appendChild(continueButton);
+            
+            const returnButton = document.createElement('button');
+            returnButton.textContent = "Retornar ao Porto";
+            returnButton.addEventListener('click', () => {
+                isExploring = false;
+                logMessage("Você decidiu retornar ao porto após sua aventura.");
+                
+                // Restaurar botão de iniciar exploração
+                actionButtons.innerHTML = '';
+                const exploreBtn = document.createElement('button');
+                exploreBtn.id = 'explore-button';
+                exploreBtn.innerHTML = `INICIAR Exploração Marítima (custo: <span class="gold-cost">10 ouros</span>)`;
+                exploreBtn.addEventListener('click', startExploration);
+                actionButtons.appendChild(exploreBtn);
+                
+                // Salvar jogo ao retornar ao porto
+                saveGame();
+            });
+            actionButtons.appendChild(returnButton);
+        }
+    </script>
+</body>
+</html>
